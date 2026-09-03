@@ -1,7 +1,16 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 
 type Status = 'idle' | 'uploading' | 'generating' | 'complete' | 'failed'
+
+type Generation = {
+  id: number
+  created_at: string
+  prompt: string
+  image_url: string
+  video_url: string
+  resolution: string
+}
 
 // Friendly translations for technical errors, so users see something
 // helpful instead of raw API/network language.
@@ -38,7 +47,39 @@ function App() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
+  const [history, setHistory] = useState<Generation[]>([])
+  const [historyLoading, setHistoryLoading] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Load past generations once when the app first opens.
+  useEffect(() => {
+    loadHistory()
+  }, [])
+
+  const loadHistory = async () => {
+    setHistoryLoading(true)
+    const { data, error } = await supabase
+      .from('generations')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (!error && data) {
+      setHistory(data as Generation[])
+    }
+    setHistoryLoading(false)
+  }
+
+  const saveToHistory = async (finishedVideoUrl: string, referenceImageUrl: string) => {
+    await supabase.from('generations').insert({
+      prompt,
+      image_url: referenceImageUrl,
+      video_url: finishedVideoUrl,
+      resolution,
+    })
+    // Refresh the list so the new video shows up right away.
+    loadHistory()
+  }
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -100,14 +141,14 @@ function App() {
         throw new Error(generateData.error || 'Generation failed to start.')
       }
 
-      await pollStatus(generateData.jobId)
+      await pollStatus(generateData.jobId, urlData.publicUrl)
     } catch (err: any) {
       setStatus('failed')
       setErrorMsg(friendlyError(err.message || ''))
     }
   }
 
-  const pollStatus = async (jobId: string) => {
+  const pollStatus = async (jobId: string, referenceImageUrl: string) => {
     const maxAttempts = 60
     const intervalMs = 5000
     let attempts = 0
@@ -134,6 +175,7 @@ function App() {
         setProgress(100)
         setVideoUrl(data.videoUrl)
         setStatus('complete')
+        await saveToHistory(data.videoUrl, referenceImageUrl)
         return
       }
 
@@ -226,6 +268,26 @@ function App() {
           </a>
         </div>
       )}
+
+      <div style={{ marginTop: '2.5rem', borderTop: '1px solid #eee', paddingTop: '1.5rem' }}>
+        <h2 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>History</h2>
+
+        {historyLoading && <p style={{ color: '#666', fontSize: '0.9rem' }}>Loading past generations...</p>}
+
+        {!historyLoading && history.length === 0 && (
+          <p style={{ color: '#666', fontSize: '0.9rem' }}>Nothing generated yet. Your finished videos will show up here.</p>
+        )}
+
+        {history.map((item) => (
+          <div key={item.id} style={{ marginBottom: '1.5rem' }}>
+            <video src={item.video_url} controls style={{ width: '100%', borderRadius: 8 }} />
+            <p style={{ fontSize: '0.85rem', color: '#333', marginTop: '0.4rem' }}>{item.prompt}</p>
+            <p style={{ fontSize: '0.75rem', color: '#999' }}>
+              {item.resolution} · {new Date(item.created_at).toLocaleString()}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

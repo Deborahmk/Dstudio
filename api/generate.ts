@@ -28,9 +28,10 @@ function buildTimelineText(timeline: any[], references: any[]): string {
     }
 
     const typeLabel = String(action.actionType || 'action').toUpperCase()
+    const accentNote = action.characterAccent ? ` (${action.characterAccent} accent)` : ''
     const desc =
       action.actionType === 'dialogue'
-        ? `${charName} says: "${action.description}"`
+        ? `${charName}${accentNote} says: "${action.description}"`
         : `${charName} ${action.description}`
 
     const cam = action.cameraNote ? ` [Camera: ${action.cameraNote}]` : ''
@@ -51,22 +52,65 @@ function buildTimelineText(timeline: any[], references: any[]): string {
   return `\n\nFollow this exact chronological order of events. Do not move any listed action earlier than its position in this list, and respect every stated timing relationship exactly as written:\n${lines.join('\n')}${silentLine}`
 }
 
+// Maps a resolution tier + aspect ratio into the specific width:height
+// pair Runway expects. These pairings are a reasonable set for each
+// combination — Runway's exact supported list can change over time,
+// so if a pairing is ever rejected, Runway's own error message is
+// passed straight back to the person rather than failing silently.
+function resolveRatio(resolution: string, aspectRatio: string): string {
+  const table: Record<string, Record<string, string>> = {
+    '16:9': {
+      '720p': '1280:720',
+      '1080p': '1920:1080',
+      '4k': '3840:2160',
+    },
+    '9:16': {
+      '720p': '720:1280',
+      '1080p': '1080:1920',
+      '4k': '2160:3840',
+    },
+    '1:1': {
+      '720p': '960:960',
+      '1080p': '1080:1080',
+      '4k': '2160:2160',
+    },
+  }
+
+  return table[aspectRatio]?.[resolution] || table['16:9']['720p']
+}
+
+// Applied to every generation, regardless of what's typed in the
+// prompt box, so the visual style stays consistent across the whole
+// project without anyone needing to remember to type it each time.
+const STYLE_DIRECTIVE =
+  'Realistic Hollywood cinematography. Natural lighting and shadows. Photorealistic architecture and environment. No artificial 3D look, no cartoon appearance, no text, no subtitles.'
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { prompt, imageUrl, duration, resolution, timeline, references } = req.body
+  const { prompt, imageUrl, duration, resolution, aspectRatio, seed, timeline, references } = req.body
 
   if (!prompt || !imageUrl) {
     return res.status(400).json({ error: 'A prompt and reference image are required.' })
   }
 
-  const ratio = resolution === '1080p' ? '1920:1080'
-    : resolution === '4k' ? '3840:2160'
-    : '1280:720'
+  const ratio = resolveRatio(resolution, aspectRatio || '16:9')
+  const finalPrompt = `${prompt}${buildTimelineText(timeline, references)}\n\n${STYLE_DIRECTIVE}`.trim()
 
-  const finalPrompt = `${prompt}${buildTimelineText(timeline, references)}`.trim()
+  const requestBody: any = {
+    model: 'gen4_turbo',
+    promptImage: imageUrl,
+    promptText: finalPrompt,
+    ratio,
+    duration: duration || 5,
+  }
+
+  const parsedSeed = seed !== undefined && seed !== null && seed !== '' ? parseInt(seed, 10) : null
+  if (parsedSeed !== null && !isNaN(parsedSeed)) {
+    requestBody.seed = parsedSeed
+  }
 
   try {
     const runwayResponse = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
@@ -76,13 +120,7 @@ export default async function handler(req: any, res: any) {
         'Content-Type': 'application/json',
         'X-Runway-Version': '2024-11-06',
       },
-      body: JSON.stringify({
-        model: 'gen4_turbo',
-        promptImage: imageUrl,
-        promptText: finalPrompt,
-        ratio,
-        duration: duration || 5,
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     const data = await runwayResponse.json()

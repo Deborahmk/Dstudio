@@ -171,3 +171,63 @@ function App() {
           onChange={handlePhotoSelect}
           style={{ display: 'none' }}
         />
+        <button onClick={() => fileInputRef.current?.click()} style={{ padding: '0.6rem 1rem' }}>
+          {imageFile ? 'Change reference photo' : 'Upload reference photo'}
+        </button>
+        {imagePreview && (
+          <img src={imagePreview} alt="reference" style={{ width: '100%', marginTop: '0.75rem', borderRadius: 8 }} />
+        )}
+      </div>
+
+      <div style={{ marginTop: '1rem' }}>
+        <label>Resolution: </label>
+        <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
+          <option value="720p">720p</option>
+          <option value="1080p">1080p</option>
+          <option value="4k">4K</option>
+        </select>
+      </div>
+
+      <button
+        onClick={handleGenerate}
+        disabled={isBusy}
+        style={{ marginTop: '1.25rem', padding: '0.8rem 1.5rem', fontSize: '1rem', width: '100%' }}
+      >
+        {status === 'uploading' && 'Uploading photo...'}
+        {status === 'generating' && 'Generating...'}
+        {(status === 'idle' || status === 'complete' || status === 'failed') && 'Generate'}
+      </button>
+
+      {isBusy && (
+        <div style={{ marginTop: '1rem' }}>
+          <div style={{ width: '100%', height: 10, background: '#eee', borderRadius: 6, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${progress}%`,
+                height: '100%',
+                background: '#4f46e5',
+                transition: 'width 0.4s ease',
+              }}
+            />
+          </div>
+          <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.4rem', textAlign: 'center' }}>
+            {progress}%
+          </p>
+        </div>
+      )}
+
+      {errorMsg && <p style={{ color: 'crimson', marginTop: '1rem' }}>{errorMsg}</p>}
+
+      {videoUrl && (
+        <div style={{ marginTop: '1.5rem' }}>
+          <video src={videoUrl} controls style={{ width: '100%', borderRadius: 8 }} />
+          <a href={videoUrl} download style={{ display: 'block', marginTop: '0.75rem', textAlign: 'center' }}>
+            Download video
+          </a>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default App

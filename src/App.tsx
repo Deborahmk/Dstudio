@@ -37,6 +37,8 @@ type Generation = {
   video_url: string
   resolution: string
   timeline: TimelineAction[] | null
+  aspect_ratio: string | null
+  seed: string | null
 }
 
 // Friendly translations for technical errors, so users see something
@@ -83,7 +85,9 @@ function makeId() {
 function App() {
   const [prompt, setPrompt] = useState('')
   const [resolution, setResolution] = useState('720p')
+  const [aspectRatio, setAspectRatio] = useState('16:9')
   const [duration, setDuration] = useState('5')
+  const [seed, setSeed] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -123,17 +127,21 @@ function App() {
       video_url: finishedVideoUrl,
       resolution,
       timeline: timeline.length > 0 ? timeline : null,
+      aspect_ratio: aspectRatio,
+      seed: seed.trim() || null,
     })
     // Refresh the list so the new video shows up right away.
     loadHistory()
   }
 
-  // Restores a past generation's prompt, resolution, and full timeline
-  // back into the form, so Regenerate picks up exactly where that
-  // generation left off.
+  // Restores a past generation's prompt, resolution, aspect ratio,
+  // seed, and full timeline back into the form, so Regenerate picks
+  // up exactly where that generation left off.
   const handleRegenerate = (item: Generation) => {
     setPrompt(item.prompt)
     setResolution(item.resolution)
+    setAspectRatio(item.aspect_ratio || '16:9')
+    setSeed(item.seed || '')
     setTimeline(item.timeline || [])
     if (item.timeline && item.timeline.length > 0) {
       setShowAdvanced(true)
@@ -339,7 +347,9 @@ function App() {
           prompt: finalPrompt,
           imageUrl: activeReference.uploadedUrl,
           resolution,
+          aspectRatio,
           duration: durationNum,
+          seed: seed.trim() || undefined,
           timeline,
           references: references.map((r) => ({ name: r.name, type: r.type })),
         }),
@@ -592,19 +602,6 @@ function App() {
 
         {showAdvanced && (
           <div style={{ marginTop: '0.75rem', padding: '0.75rem', border: '1px solid #eee', borderRadius: 10 }}>
-            <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.9rem' }}>Duration</label>
-            <select
-              value={duration}
-              onChange={(e) => {
-                setPendingConfirm(false)
-                setDuration(e.target.value)
-              }}
-              style={{ width: '100%', padding: '0.7rem', fontSize: '16px', minHeight: 48, borderRadius: 8, marginBottom: '1.25rem' }}
-            >
-              <option value="5">5 seconds</option>
-              <option value="10">10 seconds</option>
-            </select>
-
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
               <h2 style={{ fontSize: '1rem', margin: 0 }}>Actions and Timing</h2>
             </div>
@@ -809,6 +806,49 @@ function App() {
         </select>
       </div>
 
+      <div style={{ marginTop: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.9rem' }}>Aspect ratio</label>
+        <select
+          value={aspectRatio}
+          onChange={(e) => setAspectRatio(e.target.value)}
+          style={{ width: '100%', padding: '0.7rem', fontSize: '16px', minHeight: 48, borderRadius: 8 }}
+        >
+          <option value="16:9">16:9 (widescreen / cinematic)</option>
+          <option value="9:16">9:16 (vertical / mobile)</option>
+          <option value="1:1">1:1 (square)</option>
+        </select>
+      </div>
+
+      <div style={{ marginTop: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.9rem' }}>Duration</label>
+        <select
+          value={duration}
+          onChange={(e) => {
+            setPendingConfirm(false)
+            setDuration(e.target.value)
+          }}
+          style={{ width: '100%', padding: '0.7rem', fontSize: '16px', minHeight: 48, borderRadius: 8 }}
+        >
+          <option value="5">5 seconds</option>
+          <option value="10">10 seconds</option>
+        </select>
+      </div>
+
+      <div style={{ marginTop: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.9rem' }}>Seed (optional)</label>
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="Leave blank for random"
+          value={seed}
+          onChange={(e) => setSeed(e.target.value)}
+          style={{ width: '100%', padding: '0.7rem', fontSize: '16px', minHeight: 48, borderRadius: 8, border: '1px solid #ccc', boxSizing: 'border-box' }}
+        />
+        <p style={{ fontSize: '0.75rem', color: '#999', marginTop: '0.3rem' }}>
+          Reusing the same seed with the same prompt and reference can produce a more similar result — useful for small retries.
+        </p>
+      </div>
+
       <button
         onClick={handleGenerate}
         disabled={isBusy}
@@ -868,8 +908,9 @@ function App() {
             <video src={item.video_url} controls style={{ width: '100%', borderRadius: 8 }} />
             <p style={{ fontSize: '0.85rem', color: '#333', marginTop: '0.4rem' }}>{item.prompt}</p>
             <p style={{ fontSize: '0.75rem', color: '#999' }}>
-              {item.resolution} · {new Date(item.created_at).toLocaleString()}
+              {item.resolution} · {item.aspect_ratio || '16:9'} · {new Date(item.created_at).toLocaleString()}
               {item.timeline && item.timeline.length > 0 ? ` · ${item.timeline.length} timed actions` : ''}
+              {item.seed ? ` · seed ${item.seed}` : ''}
             </p>
             <button
               onClick={() => handleRegenerate(item)}
@@ -885,3 +926,5 @@ function App() {
 }
 
 export default App
+         
+     

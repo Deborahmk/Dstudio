@@ -342,21 +342,7 @@ function App() {
       {videoUrl && (
         <div style={{ marginTop: '1.5rem' }}>
           <video src={videoUrl} controls style={{ width: '100%', borderRadius: 8 }} />
-          
-            href={videoUrl}
-            download
-            style={{
-              display: 'block',
-              marginTop: '0.75rem',
-              textAlign: 'center',
-              padding: '0.75rem',
-              minHeight: 48,
-              borderRadius: 8,
-              border: '1px solid #ddd',
-            }}
-          >
-            Download video
-          </a>
+          <a href={videoUrl} download style={{ display: 'block', marginTop: '0.75rem', textAlign: 'center', padding: '0.75rem', minHeight: 48, borderRadius: 8, border: '1px solid #ddd' }}>Download video</a>
         </div>
       )}
 

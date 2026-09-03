@@ -38,6 +38,17 @@ function friendlyError(raw: string): string {
 // progress bar — Runway doesn't report a real percentage.
 const ESTIMATED_SECONDS = 180
 
+// Short example prompts to tap and try. Kept in Runway's sweet spot:
+// a subject, an action, and a bit of camera/mood detail.
+const EXAMPLE_PROMPTS = [
+  'Slow push-in on her face as she smiles, warm kitchen light',
+  'She walks across a school hallway, students blurred behind her',
+  'Close-up over the chessboard, hands moving a piece, tense mood',
+  'Wide shot of a coffee shop, steam rising, soft afternoon light',
+]
+
+const PROMPT_SOFT_LIMIT = 500
+
 function App() {
   const [prompt, setPrompt] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -192,20 +203,73 @@ function App() {
   }
 
   const isBusy = status === 'uploading' || status === 'generating'
+  const promptLength = prompt.length
+  const overSoftLimit = promptLength > PROMPT_SOFT_LIMIT
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: '2rem 1.25rem', fontFamily: 'sans-serif' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '1.5rem' }}>Dstudio</h1>
+    <div style={{ maxWidth: 480, margin: '0 auto', padding: '1.5rem 1rem 3rem', fontFamily: 'sans-serif' }}>
+      <h1 style={{ fontSize: '1.5rem', marginBottom: '1.25rem' }}>Dstudio</h1>
 
       <textarea
         placeholder="Describe the scene..."
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         rows={4}
-        style={{ width: '100%', padding: '0.75rem', fontSize: '1rem', boxSizing: 'border-box' }}
+        style={{
+          width: '100%',
+          padding: '0.75rem',
+          fontSize: '16px',
+          boxSizing: 'border-box',
+          borderRadius: 8,
+          border: '1px solid #ccc',
+        }}
       />
 
-      <div style={{ marginTop: '1rem' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          fontSize: '0.75rem',
+          color: overSoftLimit ? '#d32f2f' : '#999',
+          marginTop: '0.25rem',
+        }}
+      >
+        {promptLength} characters{overSoftLimit ? ' — consider trimming for best results' : ''}
+      </div>
+
+      <div style={{ marginTop: '0.75rem' }}>
+        <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>Need ideas? Tap one to try it:</p>
+        <div
+          style={{
+            display: 'flex',
+            gap: '0.5rem',
+            overflowX: 'auto',
+            paddingBottom: '0.25rem',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {EXAMPLE_PROMPTS.map((example, i) => (
+            <button
+              key={i}
+              onClick={() => setPrompt(example)}
+              style={{
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+                fontSize: '0.8rem',
+                padding: '0.5rem 0.9rem',
+                borderRadius: 20,
+                border: '1px solid #ddd',
+                background: '#f7f7f7',
+                minHeight: 36,
+              }}
+            >
+              {example.length > 40 ? example.slice(0, 40) + '…' : example}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginTop: '1.25rem' }}>
         <input
           type="file"
           accept="image/*"
@@ -213,7 +277,10 @@ function App() {
           onChange={handlePhotoSelect}
           style={{ display: 'none' }}
         />
-        <button onClick={() => fileInputRef.current?.click()} style={{ padding: '0.6rem 1rem' }}>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          style={{ padding: '0.75rem 1.1rem', minHeight: 48, fontSize: '1rem', borderRadius: 8, width: '100%' }}
+        >
           {imageFile ? 'Change reference photo' : 'Upload reference photo'}
         </button>
         {imagePreview && (
@@ -221,9 +288,13 @@ function App() {
         )}
       </div>
 
-      <div style={{ marginTop: '1rem' }}>
-        <label>Resolution: </label>
-        <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
+      <div style={{ marginTop: '1.25rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.9rem' }}>Resolution</label>
+        <select
+          value={resolution}
+          onChange={(e) => setResolution(e.target.value)}
+          style={{ width: '100%', padding: '0.7rem', fontSize: '16px', minHeight: 48, borderRadius: 8 }}
+        >
           <option value="720p">720p</option>
           <option value="1080p">1080p</option>
           <option value="4k">4K</option>
@@ -233,7 +304,15 @@ function App() {
       <button
         onClick={handleGenerate}
         disabled={isBusy}
-        style={{ marginTop: '1.25rem', padding: '0.8rem 1.5rem', fontSize: '1rem', width: '100%' }}
+        style={{
+          marginTop: '1.5rem',
+          padding: '0.9rem 1.5rem',
+          fontSize: '1.05rem',
+          width: '100%',
+          minHeight: 52,
+          borderRadius: 8,
+          fontWeight: 600,
+        }}
       >
         {status === 'uploading' && 'Uploading photo...'}
         {status === 'generating' && 'Generating...'}
@@ -263,7 +342,19 @@ function App() {
       {videoUrl && (
         <div style={{ marginTop: '1.5rem' }}>
           <video src={videoUrl} controls style={{ width: '100%', borderRadius: 8 }} />
-          <a href={videoUrl} download style={{ display: 'block', marginTop: '0.75rem', textAlign: 'center' }}>
+          
+            href={videoUrl}
+            download
+            style={{
+              display: 'block',
+              marginTop: '0.75rem',
+              textAlign: 'center',
+              padding: '0.75rem',
+              minHeight: 48,
+              borderRadius: 8,
+              border: '1px solid #ddd',
+            }}
+          >
             Download video
           </a>
         </div>

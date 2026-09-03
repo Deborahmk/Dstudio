@@ -3,6 +3,32 @@ import { supabase } from './lib/supabase'
 
 type Status = 'idle' | 'uploading' | 'generating' | 'complete' | 'failed'
 
+// Friendly translations for technical errors, so users see something
+// helpful instead of raw API/network language.
+function friendlyError(raw: string): string {
+  const msg = raw.toLowerCase()
+  if (msg.includes('network') || msg.includes('fetch')) {
+    return "Couldn't reach the server. Check your connection and try again."
+  }
+  if (msg.includes('upload')) {
+    return 'That photo could not be uploaded. Try a different image (JPG or PNG works best).'
+  }
+  if (msg.includes('credit') || msg.includes('billing') || msg.includes('insufficient')) {
+    return 'Generation could not start — the account needs credits added.'
+  }
+  if (msg.includes('timeout') || msg.includes('taking longer')) {
+    return 'This is taking longer than expected. Check back in a few minutes.'
+  }
+  if (msg.includes('invalid') && msg.includes('image')) {
+    return 'That image could not be used as a reference. Try a clearer photo.'
+  }
+  return raw || 'Something went wrong. Please try again.'
+}
+
+// Expected generation time in seconds, used only to estimate the
+// progress bar — Runway doesn't report a real percentage.
+const ESTIMATED_SECONDS = 180
+
 function App() {
   const [prompt, setPrompt] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -11,6 +37,7 @@ function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -23,6 +50,7 @@ function App() {
   const handleGenerate = async () => {
     setErrorMsg(null)
     setVideoUrl(null)
+    setProgress(0)
 
     if (!prompt.trim()) {
       setErrorMsg('Write a prompt describing the scene first.')
@@ -35,6 +63,7 @@ function App() {
 
     try {
       setStatus('uploading')
+      setProgress(5)
 
       const fileExt = imageFile.name.split('.').pop()
       const fileName = `${Date.now()}.${fileExt}`
@@ -44,7 +73,7 @@ function App() {
         .upload(fileName, imageFile)
 
       if (uploadError) {
-        throw new Error('Could not upload the photo. Try again.')
+        throw new Error('upload failed')
       }
 
       const { data: urlData } = supabase.storage
@@ -52,6 +81,7 @@ function App() {
         .getPublicUrl(fileName)
 
       setStatus('generating')
+      setProgress(10)
 
       const generateRes = await fetch('/api/generate', {
         method: 'POST',
@@ -73,26 +103,35 @@ function App() {
       await pollStatus(generateData.jobId)
     } catch (err: any) {
       setStatus('failed')
-      setErrorMsg(err.message || 'Something went wrong.')
+      setErrorMsg(friendlyError(err.message || ''))
     }
   }
 
   const pollStatus = async (jobId: string) => {
     const maxAttempts = 60
+    const intervalMs = 5000
     let attempts = 0
+    const startTime = Date.now()
 
     const check = async (): Promise<void> => {
       if (attempts >= maxAttempts) {
         setStatus('failed')
-        setErrorMsg('This is taking longer than expected. Check back in a bit.')
+        setErrorMsg(friendlyError('taking longer than expected'))
         return
       }
       attempts++
+
+      // Estimate progress from elapsed time, capped at 95% until we
+      // actually hear back that it's done.
+      const elapsedSeconds = (Date.now() - startTime) / 1000
+      const estimated = 10 + (elapsedSeconds / ESTIMATED_SECONDS) * 85
+      setProgress(Math.min(95, Math.round(estimated)))
 
       const res = await fetch(`/api/status?jobId=${jobId}`)
       const data = await res.json()
 
       if (data.status === 'complete') {
+        setProgress(100)
         setVideoUrl(data.videoUrl)
         setStatus('complete')
         return
@@ -100,11 +139,11 @@ function App() {
 
       if (data.status === 'failed') {
         setStatus('failed')
-        setErrorMsg(data.error || 'Generation failed.')
+        setErrorMsg(friendlyError(data.error || 'Generation failed.'))
         return
       }
 
-      setTimeout(check, 5000)
+      setTimeout(check, intervalMs)
     }
 
     await check()
@@ -132,45 +171,3 @@ function App() {
           onChange={handlePhotoSelect}
           style={{ display: 'none' }}
         />
-        <button onClick={() => fileInputRef.current?.click()} style={{ padding: '0.6rem 1rem' }}>
-          {imageFile ? 'Change reference photo' : 'Upload reference photo'}
-        </button>
-        {imagePreview && (
-          <img src={imagePreview} alt="reference" style={{ width: '100%', marginTop: '0.75rem', borderRadius: 8 }} />
-        )}
-      </div>
-
-      <div style={{ marginTop: '1rem' }}>
-        <label>Resolution: </label>
-        <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
-          <option value="720p">720p</option>
-          <option value="1080p">1080p</option>
-          <option value="4k">4K</option>
-        </select>
-      </div>
-
-      <button
-        onClick={handleGenerate}
-        disabled={isBusy}
-        style={{ marginTop: '1.25rem', padding: '0.8rem 1.5rem', fontSize: '1rem', width: '100%' }}
-      >
-        {status === 'uploading' && 'Uploading photo...'}
-        {status === 'generating' && 'Generating...'}
-        {(status === 'idle' || status === 'complete' || status === 'failed') && 'Generate'}
-      </button>
-
-      {errorMsg && <p style={{ color: 'crimson', marginTop: '1rem' }}>{errorMsg}</p>}
-
-      {videoUrl && (
-        <div style={{ marginTop: '1.5rem' }}>
-          <video src={videoUrl} controls style={{ width: '100%', borderRadius: 8 }} />
-          <a href={videoUrl} download style={{ display: 'block', marginTop: '0.75rem', textAlign: 'center' }}>
-            Download video
-          </a>
-        </div>
-      )}
-    </div>
-  )
-}
-
-export default App

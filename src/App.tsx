@@ -10,6 +10,7 @@ type TimelineAction = {
   id: string
   characterId: string | null
   characterName: string
+  characterAccent: string
   description: string
   startTime: string
   endTime: string
@@ -24,6 +25,7 @@ type Reference = {
   name: string
   type: ReferenceType
   identityLocked: boolean
+  accent: string
   previewUrl: string
   uploadedUrl: string | null
   uploading: boolean
@@ -169,6 +171,7 @@ function App() {
           name: '',
           type: 'character',
           identityLocked: true,
+          accent: 'Neutral English',
           previewUrl,
           uploadedUrl: null,
           uploading: true,
@@ -233,6 +236,7 @@ function App() {
         id: makeId(),
         characterId: null,
         characterName: '',
+        characterAccent: '',
         description: '',
         startTime: '',
         endTime: '',
@@ -351,7 +355,7 @@ function App() {
           duration: durationNum,
           seed: seed.trim() || undefined,
           timeline,
-          references: references.map((r) => ({ name: r.name, type: r.type })),
+          references: references.map((r) => ({ name: r.name, type: r.type, accent: r.accent })),
         }),
       })
 
@@ -562,6 +566,22 @@ function App() {
                   </label>
                 </div>
 
+                {ref.type === 'character' && (
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <select
+                      value={ref.accent}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => updateReference(ref.id, { accent: e.target.value })}
+                      style={{ width: '100%', padding: '0.35rem 0.5rem', fontSize: '0.85rem', borderRadius: 6, border: '1px solid #ccc' }}
+                    >
+                      <option value="Neutral English">Neutral English accent</option>
+                      <option value="South African English">South African English accent</option>
+                      <option value="American English">American accent</option>
+                      <option value="British English">British accent</option>
+                    </select>
+                  </div>
+                )}
+
                 <p style={{ fontSize: '0.75rem', color: '#999', marginTop: '0.4rem', marginBottom: 0 }}>
                   {ref.uploading ? 'Uploading...' : isActive ? 'Selected for this generation' : 'Tap to select'}
                 </p>
@@ -657,7 +677,7 @@ function App() {
                         updateAction(action.id, { characterId: null })
                       } else {
                         const ref = references.find((r) => r.id === val)
-                        updateAction(action.id, { characterId: val, characterName: ref?.name || '' })
+                        updateAction(action.id, { characterId: val, characterName: ref?.name || '', characterAccent: ref?.accent || '' })
                       }
                     }}
                     style={{ width: '100%', padding: '0.5rem', fontSize: '16px', borderRadius: 6, border: '1px solid #ccc', marginBottom: '0.5rem' }}
@@ -926,5 +946,3 @@ function App() {
 }
 
 export default App
-         
-     

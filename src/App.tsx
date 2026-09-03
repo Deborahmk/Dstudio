@@ -2,6 +2,17 @@ import { useState, useRef, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 
 type Status = 'idle' | 'uploading' | 'generating' | 'complete' | 'failed'
+type ReferenceType = 'character' | 'environment'
+
+type Reference = {
+  id: string
+  name: string
+  type: ReferenceType
+  identityLocked: boolean
+  previewUrl: string
+  uploadedUrl: string | null
+  uploading: boolean
+}
 
 type Generation = {
   id: number
@@ -49,10 +60,12 @@ const EXAMPLE_PROMPTS = [
 
 const PROMPT_SOFT_LIMIT = 500
 
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
 function App() {
   const [prompt, setPrompt] = useState('')
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [resolution, setResolution] = useState('720p')
   const [status, setStatus] = useState<Status>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -60,7 +73,9 @@ function App() {
   const [progress, setProgress] = useState(0)
   const [history, setHistory] = useState<Generation[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [references, setReferences] = useState<Reference[]>([])
+  const [activeReferenceId, setActiveReferenceId] = useState<string | null>(null)
+  const referenceInputRef = useRef<HTMLInputElement>(null)
 
   // Load past generations once when the app first opens.
   useEffect(() => {
@@ -92,12 +107,79 @@ function App() {
     loadHistory()
   }
 
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImageFile(file)
-    setImagePreview(URL.createObjectURL(file))
+  // Adding references: each selected photo becomes its own card right
+  // away (with a local preview), while the actual upload to Supabase
+  // Storage happens in the background so the UI never feels frozen.
+  const handleAddReferences = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    Array.from(files).forEach((file) => {
+      const id = makeId()
+      const previewUrl = URL.createObjectURL(file)
+
+      setReferences((prev) => [
+        ...prev,
+        {
+          id,
+          name: '',
+          type: 'character',
+          identityLocked: true,
+          previewUrl,
+          uploadedUrl: null,
+          uploading: true,
+        },
+      ])
+
+      uploadReferenceFile(id, file)
+    })
+
+    // Reset so selecting the same file again still fires onChange.
+    e.target.value = ''
   }
+
+  const uploadReferenceFile = async (id: string, file: File) => {
+    try {
+      const fileExt = file.name.split('.').pop()
+      const fileName = `ref-${id}.${fileExt}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('reference-images')
+        .upload(fileName, file)
+
+      if (uploadError) {
+        throw new Error('upload failed')
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('reference-images')
+        .getPublicUrl(fileName)
+
+      setReferences((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, uploadedUrl: urlData.publicUrl, uploading: false } : r))
+      )
+
+      // Auto-select the first reference that finishes uploading, so
+      // there's always something ready to generate with.
+      setActiveReferenceId((current) => current ?? id)
+    } catch {
+      setReferences((prev) => prev.map((r) => (r.id === id ? { ...r, uploading: false } : r)))
+      setErrorMsg(friendlyError('upload failed'))
+    }
+  }
+
+  const updateReference = (id: string, patch: Partial<Reference>) => {
+    setReferences((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+  }
+
+  const removeReference = (id: string) => {
+    setReferences((prev) => prev.filter((r) => r.id !== id))
+    if (activeReferenceId === id) {
+      setActiveReferenceId(null)
+    }
+  }
+
+  const activeReference = references.find((r) => r.id === activeReferenceId) || null
 
   const handleGenerate = async () => {
     setErrorMsg(null)
@@ -108,30 +190,25 @@ function App() {
       setErrorMsg('Write a prompt describing the scene first.')
       return
     }
-    if (!imageFile) {
-      setErrorMsg('Upload a reference photo first.')
+    if (!activeReference) {
+      setErrorMsg('Add and select a reference photo first.')
+      return
+    }
+    if (activeReference.uploading || !activeReference.uploadedUrl) {
+      setErrorMsg('That reference photo is still uploading. Wait a moment and try again.')
       return
     }
 
+    // If the selected reference has Identity Lock on, weave its name
+    // into the prompt automatically — this is the same "repeat the
+    // character's details every time" trick that helps keep faces
+    // consistent across separate generations, just done for you.
+    const finalPrompt =
+      activeReference.identityLocked && activeReference.name.trim()
+        ? `${activeReference.name.trim()}: ${prompt.trim()}`
+        : prompt.trim()
+
     try {
-      setStatus('uploading')
-      setProgress(5)
-
-      const fileExt = imageFile.name.split('.').pop()
-      const fileName = `${Date.now()}.${fileExt}`
-
-      const { error: uploadError } = await supabase.storage
-        .from('reference-images')
-        .upload(fileName, imageFile)
-
-      if (uploadError) {
-        throw new Error('upload failed')
-      }
-
-      const { data: urlData } = supabase.storage
-        .from('reference-images')
-        .getPublicUrl(fileName)
-
       setStatus('generating')
       setProgress(10)
 
@@ -139,8 +216,8 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
-          imageUrl: urlData.publicUrl,
+          prompt: finalPrompt,
+          imageUrl: activeReference.uploadedUrl,
           resolution,
           duration: 5,
         }),
@@ -152,7 +229,7 @@ function App() {
         throw new Error(generateData.error || 'Generation failed to start.')
       }
 
-      await pollStatus(generateData.jobId, urlData.publicUrl)
+      await pollStatus(generateData.jobId, activeReference.uploadedUrl)
     } catch (err: any) {
       setStatus('failed')
       setErrorMsg(friendlyError(err.message || ''))
@@ -269,23 +346,108 @@ function App() {
         </div>
       </div>
 
-      <div style={{ marginTop: '1.25rem' }}>
+      <div style={{ marginTop: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+          <h2 style={{ fontSize: '1rem', margin: 0 }}>References</h2>
+          <span style={{ fontSize: '0.75rem', color: '#999' }}>Tap a card to select it</span>
+        </div>
+
         <input
           type="file"
           accept="image/*"
-          ref={fileInputRef}
-          onChange={handlePhotoSelect}
+          multiple
+          ref={referenceInputRef}
+          onChange={handleAddReferences}
           style={{ display: 'none' }}
         />
         <button
-          onClick={() => fileInputRef.current?.click()}
-          style={{ padding: '0.75rem 1.1rem', minHeight: 48, fontSize: '1rem', borderRadius: 8, width: '100%' }}
+          onClick={() => referenceInputRef.current?.click()}
+          style={{ padding: '0.75rem 1.1rem', minHeight: 48, fontSize: '1rem', borderRadius: 8, width: '100%', border: '1px dashed #aaa', background: '#fafafa' }}
         >
-          {imageFile ? 'Change reference photo' : 'Upload reference photo'}
+          + Add reference photo
         </button>
-        {imagePreview && (
-          <img src={imagePreview} alt="reference" style={{ width: '100%', marginTop: '0.75rem', borderRadius: 8 }} />
+
+        {references.length === 0 && (
+          <p style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.75rem' }}>
+            Add a photo for each character and location you'll use. Runway will only see the one you select below when you generate.
+          </p>
         )}
+
+        {references.map((ref) => {
+          const isActive = ref.id === activeReferenceId
+          return (
+            <div
+              key={ref.id}
+              onClick={() => !ref.uploading && setActiveReferenceId(ref.id)}
+              style={{
+                display: 'flex',
+                gap: '0.75rem',
+                marginTop: '0.75rem',
+                padding: '0.75rem',
+                borderRadius: 10,
+                border: isActive ? '2px solid #4f46e5' : '1px solid #ddd',
+                background: isActive ? '#f5f4ff' : '#fff',
+                opacity: ref.uploading ? 0.6 : 1,
+              }}
+            >
+              <img
+                src={ref.previewUrl}
+                alt={ref.name || 'reference'}
+                style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }}
+              />
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <input
+                  type="text"
+                  placeholder="Name (e.g. Thandie)"
+                  value={ref.name}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => updateReference(ref.id, { name: e.target.value })}
+                  style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '16px', borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                />
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select
+                    value={ref.type}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => updateReference(ref.id, { type: e.target.value as ReferenceType })}
+                    style={{ padding: '0.35rem 0.5rem', fontSize: '0.85rem', borderRadius: 6, border: '1px solid #ccc' }}
+                  >
+                    <option value="character">Character</option>
+                    <option value="environment">Environment</option>
+                  </select>
+
+                  <label
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', color: '#555' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={ref.identityLocked}
+                      onChange={(e) => updateReference(ref.id, { identityLocked: e.target.checked })}
+                    />
+                    {ref.type === 'environment' ? 'Environment locked' : 'Identity locked'}
+                  </label>
+                </div>
+
+                <p style={{ fontSize: '0.75rem', color: '#999', marginTop: '0.4rem', marginBottom: 0 }}>
+                  {ref.uploading ? 'Uploading...' : isActive ? 'Selected for this generation' : 'Tap to select'}
+                </p>
+              </div>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeReference(ref.id)
+                }}
+                style={{ alignSelf: 'flex-start', border: 'none', background: 'none', color: '#999', fontSize: '1.1rem', padding: '0.25rem', minWidth: 32, minHeight: 32 }}
+                aria-label="Remove reference"
+              >
+                ✕
+              </button>
+            </div>
+          )
+        })}
       </div>
 
       <div style={{ marginTop: '1.25rem' }}>
